@@ -1,0 +1,61 @@
+claimid,claimed,budget
+001,Full medical check up,200USD
+002,Minor surgery (appendectomy),1500USD
+003,Dental cleaning and scaling,150USD
+004,Eye examination,100USD
+005,Blood test (complete panel),250USD
+006,X-ray chest,120USD
+007,Ultrasound abdomen,200USD
+008,Emergency room visit,350USD
+009,Inpatient room (per day),400USD
+010,Prescription medication,80USD
+011,Physiotherapy session (per visit),75USD
+012,Vaccination (flu shot),50USD
+013,MRI scan,800USD
+014,CT scan,600USD
+015,Cardiologist consultation,200USD
+016,Dermatologist consultation,150USD
+017,Pediatrician visit,120USD
+018,Gynecologist consultation,180USD
+019,Orthopedic consultation,175USD
+020,Neurologist consultation,225USD
+021,Maternity delivery (normal),2500USD
+022,Maternity delivery (cesarean),4500USD
+023,Ambulance service,300USD
+024,Hospital bed (ICU per day),1200USD
+025,Surgery (knee arthroscopy),3500USD
+026,Surgery (hernia repair),2800USD
+027,Surgery (gallbladder removal),4000USD
+028,Cataract surgery (per eye),2200USD
+029,Dental filling,120USD
+030,Dental crown,800USD
+031,Dental root canal,600USD
+032,Dental extraction,200USD
+033,Braces (orthodontic),3500USD
+034,Hearing aid,1200USD
+035,Walking cane/crutch,50USD
+036,Wheelchair,400USD
+037,Blood pressure monitor,60USD
+038,Glucose meter,40USD
+039,Nebulizer machine,150USD
+040,Oxygen concentrator,800USD
+041,Mental health counseling (per session),100USD
+042,Psychiatrist consultation,200USD
+043,Allergy testing,300USD
+044,Sleep study test,1000USD
+045,Colonoscopy,1500USD
+046,Endoscopy,1200USD
+047,Mammography,200USD
+048,Pap smear test,150USD
+049,Prostate screening,180USD
+050,Bone density scan,250USD
+051,Stress test (cardiac),400USD
+052,Echocardiogram,500USD
+053,Pulmonary function test,200USD
+054,Dialysis session (per treatment),350USD
+055,Chemotherapy session,2500USD
+056,Radiation therapy (per session),1800USD
+057,Joint injection (cortisone),300USD
+058,Cast application,200USD
+059,Sutures/stitches removal,75USD
+060,Wound dressing (per visit),50USD

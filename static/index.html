@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Insurance OCR - Document Extraction</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f0f2f5;
+            color: #1a1a2e;
+            min-height: 100vh;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            color: white;
+            padding: 1.5rem 2rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+
+        .header h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+        }
+
+        .header p {
+            font-size: 0.9rem;
+            opacity: 0.8;
+            margin-top: 0.25rem;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        .claim-form {
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            margin-bottom: 2rem;
+        }
+
+        .claim-form h2 {
+            font-size: 1.25rem;
+            margin-bottom: 1.5rem;
+            color: #1a1a2e;
+            border-bottom: 2px solid #e9ecef;
+            padding-bottom: 0.75rem;
+        }
+
+        .upload-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .upload-card {
+            border: 2px dashed #d0d5dd;
+            border-radius: 10px;
+            padding: 1.5rem;
+            text-align: center;
+            transition: all 0.2s;
+            cursor: pointer;
+            position: relative;
+        }
+
+        .upload-card:hover {
+            border-color: #0f3460;
+            background: #f8f9ff;
+        }
+
+        .upload-card.has-file {
+            border-color: #28a745;
+            border-style: solid;
+            background: #f0fff4;
+        }
+
+        .upload-card .icon {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .upload-card .label {
+            font-weight: 600;
+            font-size: 0.95rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .upload-card .hint {
+            font-size: 0.8rem;
+            color: #6c757d;
+        }
+
+        .upload-card .filename {
+            font-size: 0.8rem;
+            color: #28a745;
+            margin-top: 0.5rem;
+            font-weight: 500;
+        }
+
+        .upload-card input[type="file"] {
+            position: absolute;
+            inset: 0;
+            opacity: 0;
+            cursor: pointer;
+        }
+
+        .upload-card select {
+            position: absolute;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: calc(100% - 2rem);
+            padding: 0.4rem;
+            border: 1px solid #d0d5dd;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            background: white;
+            cursor: pointer;
+        }
+
+        .btn-extract {
+            display: block;
+            width: 100%;
+            max-width: 300px;
+            margin: 1.5rem auto 0;
+            padding: 0.85rem 2rem;
+            background: linear-gradient(135deg, #0f3460, #1a1a2e);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.1s, box-shadow 0.2s;
+        }
+
+        .btn-extract:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(15, 52, 96, 0.4);
+        }
+
+        .btn-extract:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 2rem;
+        }
+
+        .loading.active {
+            display: block;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #e9ecef;
+            border-top-color: #0f3460;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 1rem;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .results-section {
+            display: none;
+        }
+
+        .results-section.active {
+            display: block;
+        }
+
+        .result-card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            margin-bottom: 1.5rem;
+            overflow: hidden;
+        }
+
+        .result-header {
+            background: #f8f9fa;
+            padding: 1rem 1.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .result-header h3 {
+            font-size: 1.05rem;
+            color: #1a1a2e;
+        }
+
+        .result-header .filename-tag {
+            font-size: 0.8rem;
+            color: #6c757d;
+            background: #e9ecef;
+            padding: 0.2rem 0.6rem;
+            border-radius: 4px;
+        }
+
+        .result-tabs {
+            display: flex;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .result-tabs button {
+            flex: 1;
+            padding: 0.7rem;
+            border: none;
+            background: transparent;
+            font-size: 0.9rem;
+            font-weight: 500;
+            color: #6c757d;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .result-tabs button.active {
+            color: #0f3460;
+            border-bottom: 2px solid #0f3460;
+            background: white;
+        }
+
+        .result-tabs button:hover {
+            background: #f8f9ff;
+        }
+
+        .result-content {
+            padding: 1.5rem;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        .tab-panel {
+            display: none;
+        }
+
+        .tab-panel.active {
+            display: block;
+        }
+
+        .markdown-content {
+            line-height: 1.7;
+        }
+
+        .markdown-content table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 0.5rem 0;
+        }
+
+        .markdown-content th,
+        .markdown-content td {
+            border: 1px solid #dee2e6;
+            padding: 0.5rem 0.75rem;
+            text-align: left;
+            font-size: 0.9rem;
+        }
+
+        .markdown-content th {
+            background: #f8f9fa;
+            font-weight: 600;
+        }
+
+        .markdown-content h1, .markdown-content h2, .markdown-content h3 {
+            margin-top: 1rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .markdown-content ul, .markdown-content ol {
+            padding-left: 1.5rem;
+            margin: 0.5rem 0;
+        }
+
+        .json-content {
+            background: #1a1a2e;
+            color: #e0e0e0;
+            padding: 1rem;
+            border-radius: 8px;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 0.85rem;
+            line-height: 1.6;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .btn-copy {
+            padding: 0.3rem 0.7rem;
+            font-size: 0.75rem;
+            background: #0f3460;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .btn-copy:hover {
+            background: #1a1a2e;
+        }
+
+        .error-msg {
+            background: #fff5f5;
+            color: #c53030;
+            padding: 1rem;
+            border-radius: 8px;
+            border: 1px solid #fed7d7;
+            margin-bottom: 1rem;
+            display: none;
+        }
+
+        .error-msg.active {
+            display: block;
+        }
+
+        .preview-img {
+            max-width: 100%;
+            max-height: 150px;
+            border-radius: 6px;
+            margin-top: 0.5rem;
+            object-fit: contain;
+        }
+
+        @media (max-width: 768px) {
+            .container { padding: 1rem; }
+            .upload-grid { grid-template-columns: 1fr; }
+            .claim-form { padding: 1.25rem; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Insurance OCR</h1>
+        <p>Extract data from insurance documents using AI-powered OCR</p>
+    </div>
+
+    <div class="container">
+        <div class="error-msg" id="errorMsg"></div>
+
+        <div class="claim-form">
+            <h2>Claim Form - Upload Documents</h2>
+            <div class="upload-grid">
+                <div class="upload-card" id="card-insurance-card">
+                    <div class="icon">&#128179;</div>
+                    <div class="label">Insurance Card</div>
+                    <div class="hint">Upload insurance card image</div>
+                    <div class="filename" id="filename-insurance-card"></div>
+                    <img class="preview-img" id="preview-insurance-card" style="display:none">
+                    <input type="file" accept="image/*" data-doc-type="insurance_card" id="input-insurance-card">
+                </div>
+
+                <div class="upload-card" id="card-medical-invoice">
+                    <div class="icon">&#128196;</div>
+                    <div class="label">Medical Insurance Invoice</div>
+                    <div class="hint">Upload medical invoice image</div>
+                    <div class="filename" id="filename-medical-invoice"></div>
+                    <img class="preview-img" id="preview-medical-invoice" style="display:none">
+                    <input type="file" accept="image/*" data-doc-type="medical_invoice" id="input-medical-invoice">
+                </div>
+
+                <div class="upload-card" id="card-cms1500">
+                    <div class="icon">&#128203;</div>
+                    <div class="label">CMS-1500 Claim Form</div>
+                    <div class="hint">Upload HCFA-1500 claim form image</div>
+                    <div class="filename" id="filename-cms1500"></div>
+                    <img class="preview-img" id="preview-cms1500" style="display:none">
+                    <input type="file" accept="image/*" data-doc-type="cms1500" id="input-cms1500">
+                </div>
+
+                <div class="upload-card" id="card-drivers-license">
+                    <div class="icon">&#128100;</div>
+                    <div class="label">Driver's License / ID Card</div>
+                    <div class="hint">Upload driver's license or ID card image</div>
+                    <div class="filename" id="filename-drivers-license"></div>
+                    <img class="preview-img" id="preview-drivers-license" style="display:none">
+                    <input type="file" accept="image/*" data-doc-type="drivers_license" id="input-drivers-license">
+                </div>
+
+                <div class="upload-card" id="card-additional">
+                    <div class="icon">&#128218;</div>
+                    <div class="label">Additional Document</div>
+                    <div class="hint">Upload medical records, receipts, prescriptions, lab results, etc.</div>
+                    <div class="filename" id="filename-additional"></div>
+                    <img class="preview-img" id="preview-additional" style="display:none">
+                    <input type="file" accept="image/*" id="input-additional">
+                    <select id="doc-type-select">
+                        <option value="medical_record">Medical Record</option>
+                        <option value="receipt">Receipt / Kuitansi</option>
+                        <option value="prescription">Prescription / Perincian Obat</option>
+                        <option value="lab_result">Lab Result</option>
+                        <option value="other">Other Document</option>
+                    </select>
+                </div>
+            </div>
+
+            <button class="btn-extract" id="btnExtract" onclick="extractAll()">
+                Extract Data
+            </button>
+        </div>
+
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>Processing documents with AI OCR...</p>
+        </div>
+
+        <div class="results-section" id="resultsSection">
+            <h2 style="margin-bottom: 1rem; font-size: 1.25rem;">Extraction Results</h2>
+            <div id="resultsContainer"></div>
+        </div>
+    </div>
+
+    <script>
+        // File handling
+        const fileInputs = document.querySelectorAll('input[type="file"]');
+        const files = {};
+
+        fileInputs.forEach(input => {
+            input.addEventListener('change', function(e) {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const id = this.id;
+                files[id] = file;
+
+                const cardId = this.closest('.upload-card').id;
+                const card = document.getElementById(cardId);
+                card.classList.add('has-file');
+
+                // Show filename
+                const filenameEl = document.getElementById('filename-' + id.replace('input-', ''));
+                filenameEl.textContent = file.name;
+
+                // Show preview
+                const previewEl = document.getElementById('preview-' + id.replace('input-', ''));
+                const reader = new FileReader();
+                reader.onload = (ev) => { previewEl.src = ev.target.result; previewEl.style.display = 'block'; };
+                reader.readAsDataURL(file);
+            });
+        });
+
+        function showError(msg) {
+            const el = document.getElementById('errorMsg');
+            el.textContent = msg;
+            el.classList.add('active');
+            setTimeout(() => el.classList.remove('active'), 5000);
+        }
+
+        async function extractAll() {
+            const btn = document.getElementById('btnExtract');
+            const loading = document.getElementById('loading');
+            const resultsSection = document.getElementById('resultsSection');
+            const resultsContainer = document.getElementById('resultsContainer');
+
+            if (Object.keys(files).length === 0) {
+                showError('Please upload at least one document.');
+                return;
+            }
+
+            btn.disabled = true;
+            loading.classList.add('active');
+            resultsSection.classList.remove('active');
+            resultsContainer.innerHTML = '';
+
+            try {
+                for (const [inputId, file] of Object.entries(files)) {
+                    let docType;
+                    if (inputId === 'input-insurance-card') {
+                        docType = 'insurance_card';
+                    } else if (inputId === 'input-medical-invoice') {
+                        docType = 'medical_invoice';
+                    } else if (inputId === 'input-cms1500') {
+                        docType = 'cms1500';
+                    } else if (inputId === 'input-drivers-license') {
+                        docType = 'drivers_license';
+                    } else {
+                        docType = document.getElementById('doc-type-select').value;
+                    }
+
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    formData.append('doc_type', docType);
+
+                    const response = await fetch('/api/ocr', {
+                        method: 'POST',
+                        body: formData,
+                    });
+
+                    if (!response.ok) {
+                        const err = await response.json();
+                        showError(`Error processing ${file.name}: ${err.detail || 'Unknown error'}`);
+                        continue;
+                    }
+
+                    const data = await response.json();
+                    renderResult(data, inputId);
+                }
+
+                resultsSection.classList.add('active');
+                resultsSection.scrollIntoView({ behavior: 'smooth' });
+            } catch (err) {
+                showError('Failed to process documents: ' + err.message);
+            } finally {
+                btn.disabled = false;
+                loading.classList.remove('active');
+            }
+        }
+
+        function renderResult(data, inputId) {
+            const container = document.getElementById('resultsContainer');
+            const docTypeLabel = {
+                insurance_card: 'Insurance Card',
+                medical_invoice: 'Medical Invoice',
+                cms1500: 'CMS-1500 Claim Form',
+                drivers_license: "Driver's License / ID Card",
+                medical_record: 'Medical Record',
+                receipt: 'Receipt / Kuitansi',
+                prescription: 'Prescription / Perincian Obat',
+                lab_result: 'Lab Result',
+                other: 'Other Document',
+            }[data.doc_type] || data.doc_type;
+
+            const result = data.result || {};
+            const markdown = result.markdown || 'No markdown output';
+            const jsonStr = JSON.stringify(result.json || result, null, 2);
+            const cardId = 'result-' + Date.now() + '-' + Math.random().toString(36).substr(2, 5);
+
+            const card = document.createElement('div');
+            card.className = 'result-card';
+            card.innerHTML = `
+                <div class="result-header">
+                    <h3>${docTypeLabel}</h3>
+                    <span class="filename-tag">${data.filename}</span>
+                </div>
+                <div class="result-tabs">
+                    <button class="active" onclick="switchTab('${cardId}', 'markdown', this)">Markdown</button>
+                    <button onclick="switchTab('${cardId}', 'json', this)">JSON</button>
+                </div>
+                <div class="result-content">
+                    <div class="tab-panel active" id="${cardId}-markdown">
+                        <div class="markdown-content">${renderMarkdown(markdown)}</div>
+                    </div>
+                    <div class="tab-panel" id="${cardId}-json">
+                        <div style="display:flex;justify-content:flex-end;margin-bottom:0.5rem">
+                            <button class="btn-copy" onclick="copyJson(this)">Copy JSON</button>
+                        </div>
+                        <div class="json-content">${escapeHtml(jsonStr)}</div>
+                    </div>
+                </div>
+            `;
+            container.appendChild(card);
+        }
+
+        function switchTab(cardId, tab, btn) {
+            const card = btn.closest('.result-card');
+            card.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+            card.querySelectorAll('.result-tabs button').forEach(b => b.classList.remove('active'));
+            document.getElementById(cardId + '-' + tab).classList.add('active');
+            btn.classList.add('active');
+        }
+
+        function copyJson(btn) {
+            const jsonEl = btn.closest('.result-content').querySelector('.json-content');
+            navigator.clipboard.writeText(jsonEl.textContent).then(() => {
+                btn.textContent = 'Copied!';
+                setTimeout(() => btn.textContent = 'Copy JSON', 1500);
+            });
+        }
+
+        function escapeHtml(str) {
+            return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        function renderMarkdown(md) {
+            // Simple markdown renderer
+            let html = escapeHtml(md);
+
+            // Headers
+            html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+            html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+            html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+
+            // Bold
+            html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
+            // Italic
+            html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+
+            // Tables
+            html = html.replace(/^(\|.+\|)\n(\|[-| :]+\|)\n((?:\|.+\|\n?)*)/gm, function(match, header, sep, body) {
+                const headers = header.split('|').filter(c => c.trim()).map(c => `<th>${c.trim()}</th>`).join('');
+                const rows = body.trim().split('\n').map(row => {
+                    const cells = row.split('|').filter(c => c.trim()).map(c => `<td>${c.trim()}</td>`).join('');
+                    return `<tr>${cells}</tr>`;
+                }).join('');
+                return `<table><thead><tr>${headers}</tr></thead><tbody>${rows}</tbody></table>`;
+            });
+
+            // Unordered lists
+            html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
+            html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>');
+
+            // Line breaks
+            html = html.replace(/\n\n/g, '</p><p>');
+            html = html.replace(/\n/g, '<br>');
+            html = '<p>' + html + '</p>';
+
+            // Clean up empty paragraphs
+            html = html.replace(/<p>\s*<\/p>/g, '');
+            html = html.replace(/<p>\s*(<h[1-3]>)/g, '$1');
+            html = html.replace(/(<\/h[1-3]>)\s*<\/p>/g, '$1');
+            html = html.replace(/<p>\s*(<table>)/g, '$1');
+            html = html.replace(/(<\/table>)\s*<\/p>/g, '$1');
+            html = html.replace(/<p>\s*(<ul>)/g, '$1');
+            html = html.replace(/(<\/ul>)\s*<\/p>/g, '$1');
+
+            return html;
+        }
+    </script>
+</body>
+</html>
