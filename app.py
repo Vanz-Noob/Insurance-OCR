@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse
 from openai import OpenAI
 from dotenv import load_dotenv
 import uvicorn
+from rag_service import search_knowledge, knowledge_service_chat
 
 load_dotenv()
 
@@ -25,6 +26,9 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 ARK_BASE_URL = os.getenv("ARK_BASE_URL", "https://ark.ap-southeast.bytepluses.com/api/v3")
 MODEL = os.getenv("MODEL", "seed-2-0-pro-260328")
+RAG_COLLECTION_NAME = os.getenv("RAG_COLLECTION_NAME", "")
+RAG_RESOURCE_ID = os.getenv("RAG_RESOURCE_ID", "")
+RAG_SERVICE_RESOURCE_ID = os.getenv("RAG_SERVICE_RESOURCE_ID", "")
 
 
 def get_client():
@@ -300,6 +304,189 @@ async def ocr_batch(
         }
 
     return results
+
+
+@app.post("/api/claim-check")
+async def claim_check(
+    ocr_results: str = Form(...),
+):
+    """
+    Check claim eligibility and fraud potential using RAG + LLM.
+
+    ocr_results: JSON string of OCR extraction results from the frontend
+    """
+    try:
+        ocr_data = json.loads(ocr_results)
+    except json.JSONDecodeError:
+        return {"error": "Invalid JSON in ocr_results"}
+
+    # Build a summary query from OCR results for RAG search
+    # Prioritize medical_invoice descriptions (doctor's procedures/treatments)
+    descriptions = []
+    other_terms = []
+
+    for _doc_type, doc_data in ocr_data.items():
+        result_json = doc_data.get("result", {}).get("json", {})
+        if isinstance(result_json, dict):
+            # Extract description items from medical invoice (doctor's procedures)
+            if "items" in result_json:
+                for item in result_json["items"]:
+                    desc = item.get("description", "")
+                    amount = item.get("amount", "")
+                    if desc:
+                        descriptions.append({"description": desc, "amount": amount})
+            if "diagnosis_codes" in result_json:
+                other_terms.extend(result_json["diagnosis_codes"])
+            if "service_lines" in result_json:
+                for sl in result_json["service_lines"]:
+                    if sl.get("cpt_code"):
+                        other_terms.append(sl["cpt_code"])
+            if "total" in result_json:
+                other_terms.append(f"total amount: {result_json['total']}")
+            if "total_charge" in result_json:
+                other_terms.append(f"total charge: {result_json['total_charge']}")
+
+    # Query RAG for each description item individually
+    rag_context = ""
+    rag_results_raw = []
+    try:
+        if RAG_SERVICE_RESOURCE_ID:
+            if descriptions:
+                for idx, desc_item in enumerate(descriptions):
+                    desc_text = desc_item["description"]
+                    amount_text = desc_item.get("amount", "")
+                    rag_query = f"Is '{desc_text}' (amount: {amount_text}) covered under the insurance policy? What is the coverage limit and any restrictions?"
+
+                    rag_response = knowledge_service_chat(rag_query)
+                    if rag_response.get("code") == 0:
+                        chat_data = rag_response.get("data", {})
+                        answer = chat_data.get("answer", "")
+                        rag_context += f"\n\n### Item {idx+1}: {desc_text} (${amount_text})\n{answer}"
+                        rag_results_raw.append({
+                            "item": desc_text,
+                            "amount": amount_text,
+                            "answer": answer,
+                            "source": "knowledge_service_chat"
+                        })
+                    else:
+                        rag_context += f"\n\n### Item {idx+1}: {desc_text}\nRAG error: {rag_response.get('message', 'unknown')}"
+            else:
+                rag_context = "\nNo description items found in OCR results to query against policy."
+        elif RAG_COLLECTION_NAME or RAG_RESOURCE_ID:
+            # Fallback: search_knowledge for each description
+            if descriptions:
+                for idx, desc_item in enumerate(descriptions):
+                    desc_text = desc_item["description"]
+                    rag_response = search_knowledge(
+                        collection_name=RAG_COLLECTION_NAME,
+                        query=desc_text,
+                        limit=5,
+                        resource_id=RAG_RESOURCE_ID if RAG_RESOURCE_ID else None,
+                    )
+                    if rag_response.get("code") == 0:
+                        result_list = rag_response.get("data", {}).get("result_list", [])
+                        for r in result_list:
+                            content = r.get("content", "")
+                            score = r.get("score", 0)
+                            rag_results_raw.append({"item": desc_text, "content": content, "score": score})
+                            rag_context += f"\n- [{desc_text}] {content} (score: {score:.3f})"
+            else:
+                rag_context = "\nNo description items found in OCR results to query against policy."
+        else:
+            rag_context = "\nNo RAG knowledge base configured. Using LLM knowledge only."
+    except Exception as e:
+        rag_context = f"\nRAG search failed: {str(e)}"
+
+    # Use LLM to analyze claim eligibility and fraud
+    system_prompt = """You are an expert insurance claims analyst. You must analyze the OCR-extracted document data and the RAG-retrieved policy information to determine:
+
+1. **Claim Eligibility**: Can this claim be approved?
+   - "full": The claim is fully eligible for reimbursement
+   - "partial": Only some items are eligible (specify which)
+   - "denied": The claim is not eligible
+
+2. **Eligible Items**: List which specific items/services are claimable and the allowed amount based on policy.
+
+3. **Non-Eligible Items**: List items that are NOT claimable with reasons.
+
+4. **Fraud Analysis**: Analyze for potential fraud indicators:
+   - Duplicate claims
+   - Inflated charges vs policy limits
+   - Mismatched diagnosis and procedures
+   - Suspicious provider information
+   - Inconsistent dates or amounts
+   - Upcoding or unbundling indicators
+
+5. **Risk Score**: 0-100 (0 = no fraud risk, 100 = high fraud risk)
+
+6. **Recommendations**: Actionable next steps
+
+Respond with a valid JSON object containing:
+{
+  "claim_status": "full" | "partial" | "denied",
+  "claim_status_reason": "explanation",
+  "eligible_items": [{"item": "...", "allowed_amount": "...", "reason": "..."}],
+  "non_eligible_items": [{"item": "...", "reason": "..."}],
+  "total_eligible_amount": "...",
+  "fraud_analysis": {
+    "risk_level": "low" | "medium" | "high",
+    "risk_score": 0-100,
+    "indicators": ["indicator1", "indicator2"],
+    "explanation": "detailed analysis"
+  },
+  "recommendations": ["rec1", "rec2"],
+  "markdown": "markdown formatted summary of the analysis"
+}
+
+Make sure the JSON is valid. Do not include any text outside the JSON object."""
+
+    user_prompt = f"""## OCR Extracted Document Data:
+{json.dumps(ocr_data, indent=2)}
+
+## RAG Retrieved Policy Information (queried per invoice item):
+{rag_context if rag_context else "No policy information retrieved from knowledge base."}
+
+Please analyze each medical procedure/description item from the invoice against the RAG policy data above. For each item, determine:
+- Is it covered under the policy?
+- What is the allowed coverage amount vs the billed amount?
+- Are there any restrictions or exclusions?
+
+Then provide the overall claim eligibility decision and fraud analysis."""
+
+    client = get_client()
+    response = client.chat.completions.create(
+        model=MODEL,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        max_tokens=4096,
+    )
+
+    result_text = response.choices[0].message.content.strip()
+
+    # Handle code block wrapping
+    if result_text.startswith("```"):
+        lines = result_text.split("\n")
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        result_text = "\n".join(lines)
+
+    try:
+        analysis = json.loads(result_text)
+    except json.JSONDecodeError:
+        analysis = {
+            "claim_status": "unknown",
+            "claim_status_reason": "Failed to parse LLM response",
+            "markdown": result_text,
+        }
+
+    return {
+        "rag_context": rag_results_raw,
+        "analysis": analysis,
+    }
 
 
 if __name__ == "__main__":

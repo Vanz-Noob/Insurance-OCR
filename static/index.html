@@ -341,6 +341,98 @@
             .upload-grid { grid-template-columns: 1fr; }
             .claim-form { padding: 1.25rem; }
         }
+
+        /* Claim Analysis Styles */
+        .claim-status-badge {
+            display: inline-block;
+            padding: 0.5rem 1.2rem;
+            border-radius: 20px;
+            font-weight: 700;
+            font-size: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .claim-status-badge.full { background: #d4edda; color: #155724; }
+        .claim-status-badge.partial { background: #fff3cd; color: #856404; }
+        .claim-status-badge.denied { background: #f8d7da; color: #721c24; }
+
+        .fraud-risk-bar {
+            height: 10px;
+            border-radius: 5px;
+            background: #e9ecef;
+            overflow: hidden;
+            margin: 0.5rem 0;
+        }
+        .fraud-risk-bar-fill {
+            height: 100%;
+            border-radius: 5px;
+            transition: width 0.5s;
+        }
+        .fraud-risk-bar-fill.low { background: #28a745; }
+        .fraud-risk-bar-fill.medium { background: #ffc107; }
+        .fraud-risk-bar-fill.high { background: #dc3545; }
+
+        .claim-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin: 1rem 0;
+        }
+        @media (max-width: 768px) {
+            .claim-grid { grid-template-columns: 1fr; }
+        }
+
+        .claim-card {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 1rem;
+            border-left: 4px solid;
+        }
+        .claim-card.eligible { border-color: #28a745; }
+        .claim-card.not-eligible { border-color: #dc3545; }
+        .claim-card h4 { margin-bottom: 0.5rem; font-size: 0.9rem; }
+        .claim-card ul { padding-left: 1.2rem; font-size: 0.85rem; margin: 0.3rem 0; }
+
+        .fraud-section {
+            background: #fff8f0;
+            border: 1px solid #ffd6a5;
+            border-radius: 8px;
+            padding: 1rem;
+            margin: 1rem 0;
+        }
+        .fraud-section h4 { color: #e65100; margin-bottom: 0.5rem; }
+        .fraud-indicators {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin: 0.5rem 0;
+        }
+        .fraud-indicator-tag {
+            background: #fff3e0;
+            color: #e65100;
+            padding: 0.2rem 0.6rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            border: 1px solid #ffcc80;
+        }
+
+        .rag-context-section {
+            background: #f0f4ff;
+            border: 1px solid #b8d4ff;
+            border-radius: 8px;
+            padding: 1rem;
+            margin: 1rem 0;
+        }
+        .rag-context-section h4 { color: #0f3460; margin-bottom: 0.5rem; }
+        .rag-item {
+            background: white;
+            border-radius: 4px;
+            padding: 0.5rem;
+            margin: 0.3rem 0;
+            font-size: 0.85rem;
+            border: 1px solid #dee2e6;
+        }
+        .rag-score { color: #6c757d; font-size: 0.75rem; }
     </style>
 </head>
 <body>
@@ -421,6 +513,20 @@
         <div class="results-section" id="resultsSection">
             <h2 style="margin-bottom: 1rem; font-size: 1.25rem;">Extraction Results</h2>
             <div id="resultsContainer"></div>
+
+            <button class="btn-extract" id="btnClaimCheck" onclick="checkClaim()" style="margin-top:1.5rem; display:none;">
+                Check Claim Eligibility & Fraud Analysis
+            </button>
+        </div>
+
+        <div class="loading" id="claimLoading">
+            <div class="spinner"></div>
+            <p>Analyzing claim eligibility and fraud risk...</p>
+        </div>
+
+        <div class="results-section" id="claimSection">
+            <h2 style="margin-bottom: 1rem; font-size: 1.25rem;">Claim Check & Fraud Analysis</h2>
+            <div id="claimContainer"></div>
         </div>
     </div>
 
@@ -428,6 +534,7 @@
         // File handling
         const fileInputs = document.querySelectorAll('input[type="file"]');
         const files = {};
+        let ocrResultsStore = {}; // Store OCR results for claim check
 
         fileInputs.forEach(input => {
             input.addEventListener('change', function(e) {
@@ -511,6 +618,7 @@
                 }
 
                 resultsSection.classList.add('active');
+                document.getElementById('btnClaimCheck').style.display = 'block';
                 resultsSection.scrollIntoView({ behavior: 'smooth' });
             } catch (err) {
                 showError('Failed to process documents: ' + err.message);
@@ -563,6 +671,9 @@
                 </div>
             `;
             container.appendChild(card);
+
+            // Store for claim check
+            ocrResultsStore[data.doc_type] = data;
         }
 
         function switchTab(cardId, tab, btn) {
@@ -629,6 +740,175 @@
             html = html.replace(/(<\/ul>)\s*<\/p>/g, '$1');
 
             return html;
+        }
+
+        async function checkClaim() {
+            const btn = document.getElementById('btnClaimCheck');
+            const claimLoading = document.getElementById('claimLoading');
+            const claimSection = document.getElementById('claimSection');
+            const claimContainer = document.getElementById('claimContainer');
+
+            if (Object.keys(ocrResultsStore).length === 0) {
+                showError('No OCR results to check. Please extract documents first.');
+                return;
+            }
+
+            btn.disabled = true;
+            claimLoading.classList.add('active');
+            claimSection.classList.remove('active');
+            claimContainer.innerHTML = '';
+
+            try {
+                const formData = new FormData();
+                formData.append('ocr_results', JSON.stringify(ocrResultsStore));
+
+                const response = await fetch('/api/claim-check', {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                if (!response.ok) {
+                    const err = await response.json();
+                    showError(`Claim check error: ${err.detail || 'Unknown error'}`);
+                    return;
+                }
+
+                const data = await response.json();
+                renderClaimAnalysis(data);
+                claimSection.classList.add('active');
+                claimSection.scrollIntoView({ behavior: 'smooth' });
+            } catch (err) {
+                showError('Claim check failed: ' + err.message);
+            } finally {
+                btn.disabled = false;
+                claimLoading.classList.remove('active');
+            }
+        }
+
+        function renderClaimAnalysis(data) {
+            const container = document.getElementById('claimContainer');
+            const analysis = data.analysis || {};
+            const fraud = analysis.fraud_analysis || {};
+            const ragContext = data.rag_context || [];
+
+            const statusLabels = { full: 'Fully Claimable', partial: 'Partially Claimable', denied: 'Claim Denied' };
+            const status = analysis.claim_status || 'unknown';
+
+            let eligibleHtml = '';
+            if (analysis.eligible_items && analysis.eligible_items.length > 0) {
+                eligibleHtml = analysis.eligible_items.map(i =>
+                    `<li><strong>${escapeHtml(i.item || '')}</strong> — Allowed: ${escapeHtml(i.allowed_amount || 'N/A')}<br><small>${escapeHtml(i.reason || '')}</small></li>`
+                ).join('');
+            } else {
+                eligibleHtml = '<li>None identified</li>';
+            }
+
+            let nonEligibleHtml = '';
+            if (analysis.non_eligible_items && analysis.non_eligible_items.length > 0) {
+                nonEligibleHtml = analysis.non_eligible_items.map(i =>
+                    `<li><strong>${escapeHtml(i.item || '')}</strong><br><small>${escapeHtml(i.reason || '')}</small></li>`
+                ).join('');
+            } else {
+                nonEligibleHtml = '<li>None</li>';
+            }
+
+            const riskScore = fraud.risk_score || 0;
+            const riskLevel = fraud.risk_level || 'low';
+            const indicators = fraud.indicators || [];
+            const recommendations = analysis.recommendations || [];
+
+            let ragHtml = '';
+            if (ragContext.length > 0) {
+                ragHtml = ragContext.map(r =>
+                    `<div class="rag-item">${escapeHtml(r.content || '')} <span class="rag-score">score: ${r.score ? r.score.toFixed(3) : 'N/A'}</span></div>`
+                ).join('');
+            } else {
+                ragHtml = '<div class="rag-item">No RAG context retrieved</div>';
+            }
+
+            container.innerHTML = `
+                <div class="result-card">
+                    <div class="result-header">
+                        <h3>Claim Status</h3>
+                        <span class="claim-status-badge ${status}">${statusLabels[status] || status}</span>
+                    </div>
+                    <div class="result-content">
+                        <p style="margin-bottom:1rem">${escapeHtml(analysis.claim_status_reason || '')}</p>
+                        ${analysis.total_eligible_amount ? `<p><strong>Total Eligible Amount:</strong> ${escapeHtml(analysis.total_eligible_amount)}</p>` : ''}
+
+                        <div class="claim-grid">
+                            <div class="claim-card eligible">
+                                <h4>Eligible Items</h4>
+                                <ul>${eligibleHtml}</ul>
+                            </div>
+                            <div class="claim-card not-eligible">
+                                <h4>Non-Eligible Items</h4>
+                                <ul>${nonEligibleHtml}</ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="result-card">
+                    <div class="result-header">
+                        <h3>Fraud Analysis</h3>
+                        <span class="claim-status-badge ${riskLevel === 'high' ? 'denied' : riskLevel === 'medium' ? 'partial' : 'full'}">${riskLevel.toUpperCase()} RISK</span>
+                    </div>
+                    <div class="result-content">
+                        <div class="fraud-section">
+                            <h4>Risk Score: ${riskScore}/100</h4>
+                            <div class="fraud-risk-bar">
+                                <div class="fraud-risk-bar-fill ${riskLevel}" style="width: ${riskScore}%"></div>
+                            </div>
+                            ${indicators.length > 0 ? `
+                                <h4 style="margin-top:0.75rem">Fraud Indicators</h4>
+                                <div class="fraud-indicators">
+                                    ${indicators.map(i => `<span class="fraud-indicator-tag">${escapeHtml(i)}</span>`).join('')}
+                                </div>
+                            ` : '<p style="margin-top:0.5rem">No fraud indicators detected.</p>'}
+                            ${fraud.explanation ? `<p style="margin-top:0.75rem; font-size:0.9rem">${escapeHtml(fraud.explanation)}</p>` : ''}
+                        </div>
+                    </div>
+                </div>
+
+                ${recommendations.length > 0 ? `
+                <div class="result-card">
+                    <div class="result-header">
+                        <h3>Recommendations</h3>
+                    </div>
+                    <div class="result-content">
+                        <ul style="padding-left:1.5rem">
+                            ${recommendations.map(r => `<li style="margin-bottom:0.5rem">${escapeHtml(r)}</li>`).join('')}
+                        </ul>
+                    </div>
+                </div>
+                ` : ''}
+
+                ${ragContext.length > 0 ? `
+                <div class="result-card">
+                    <div class="result-header">
+                        <h3>RAG Retrieved Policy Context</h3>
+                    </div>
+                    <div class="result-content">
+                        <div class="rag-context-section">
+                            <h4>Matched Policy Entries</h4>
+                            ${ragHtml}
+                        </div>
+                    </div>
+                </div>
+                ` : ''}
+
+                ${analysis.markdown ? `
+                <div class="result-card">
+                    <div class="result-header">
+                        <h3>Full Analysis Report</h3>
+                    </div>
+                    <div class="result-content">
+                        <div class="markdown-content">${renderMarkdown(analysis.markdown)}</div>
+                    </div>
+                </div>
+                ` : ''}
+            `;
         }
     </script>
 </body>
